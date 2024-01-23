@@ -18,7 +18,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <sys/time.h>
-#define MAXSIZE 10000  /* maximum matrix size */
+#define MAXSIZE 10  /* maximum matrix size */
 #define MAXWORKERS 10   /* maximum number of workers */
 
 pthread_mutex_t barrier;  /* mutex lock for the barrier */
@@ -55,6 +55,10 @@ double read_timer() {
 double start_time, end_time; /* start and end times */
 int size, stripSize;  /* assume size is multiple of numWorkers */
 int sums[MAXWORKERS]; /* partial sums */
+int mins[MAXWORKERS]; /* partial mins */
+int maxs[MAXWORKERS]; /* partial maxs */
+int minPositions[MAXWORKERS][2];
+int maxPositions[MAXWORKERS][2];
 int matrix[MAXSIZE][MAXSIZE]; /* matrix */
 
 void *Worker(void *);
@@ -84,12 +88,12 @@ int main(int argc, char *argv[]) {
   /* initialize the matrix */
   for (i = 0; i < size; i++) {
 	  for (j = 0; j < size; j++) {
-          matrix[i][j] = 1;//rand()%99;
+          matrix[i][j] = rand() % 56;//rand()%99;
 	  }
   }
 
   /* print the matrix */
-#ifdef DEBUG
+//#ifdef DEBUG
   for (i = 0; i < size; i++) {
 	  printf("[ ");
 	  for (j = 0; j < size; j++) {
@@ -97,7 +101,7 @@ int main(int argc, char *argv[]) {
 	  }
 	  printf(" ]\n");
   }
-#endif
+//#endif
 
   /* do the parallel work: create the workers */
   start_time = read_timer();
@@ -111,7 +115,13 @@ int main(int argc, char *argv[]) {
 void *Worker(void *arg) {
   long myid = (long) arg;
   int total, i, j, first, last;
-
+  //added a) assignment
+  /******************/
+  int min = 100;
+  int max = 0;
+  int minPosition[2];
+  int maxPosition[2];
+  /******************/
 #ifdef DEBUG
   printf("worker %d (pthread id %d) has started\n", myid, pthread_self());
 #endif
@@ -123,18 +133,59 @@ void *Worker(void *arg) {
   /* sum values in my strip */
   total = 0;
   for (i = first; i <= last; i++)
-    for (j = 0; j < size; j++)
+    for (j = 0; j < size; j++){
       total += matrix[i][j];
+      //added a) assignment
+      /******************/
+      if(matrix[i][j] > max)
+      {
+        max = matrix[i][j];
+        maxPosition[0] = i;
+        maxPosition[1] = j;
+      }
+      if(matrix[i][j] < min)
+      {
+        min = matrix[i][j];
+        minPosition[0] = i;
+        minPosition[1] = j;
+      }
+      /******************/
+    }
   sums[myid] = total;
+  mins[myid] = min;
+  maxs[myid] = max;
+  minPositions[myid][0] = minPosition[0];
+  minPositions[myid][1] = minPosition[1];
+  maxPositions[myid][0] = maxPosition[0];
+  maxPositions[myid][1] = maxPosition[1];
   Barrier();
   if (myid == 0) {
     total = 0;
+    min = 100;
+    max = 0;
     for (i = 0; i < numWorkers; i++)
+    {
       total += sums[i];
+
+      if(mins[i] < min)
+      {
+        min = mins[i];
+        minPosition[0] = minPositions[i][0];
+        minPosition[1] = minPositions[i][1];
+      }
+      if(maxs[i] > max)
+      {
+        max = maxs[i];
+        maxPosition[0] = maxPositions[i][0];
+        maxPosition[1] = maxPositions[i][1];
+      }
+    }
     /* get end time */
     end_time = read_timer();
     /* print results */
     printf("The total is %d\n", total);
+    printf("The Min value is %d and its position is (%d, %d)\n", min, minPosition[0], minPosition[1]);
+    printf("The Max value is %d and its position is (%d, %d)\n", max, maxPosition[0], maxPosition[1]);
     printf("The execution time is %g sec\n", end_time - start_time);
   }
 }

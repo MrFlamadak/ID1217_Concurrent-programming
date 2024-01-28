@@ -25,7 +25,6 @@ pthread_mutex_t barrier;  /* mutex lock for the barrier */
 pthread_mutex_t sumMutex;
 pthread_mutex_t minMutex;
 pthread_mutex_t maxMutex;
-pthread_mutex_t minmaxMutex;
 pthread_mutex_t bagMutex;
 pthread_cond_t go;        /* condition variable for leaving */
 int numWorkers;           /* number of workers */ 
@@ -69,6 +68,7 @@ int matrix[MAXSIZE][MAXSIZE]; /* matrix */
 //b)
 int sum = 0;
 
+
 //c)
 int nextrow = 0;
 
@@ -104,6 +104,13 @@ void MaxOperation(int myMax, int xPosition, int yPosition) {
     max.x = xPosition;
     max.y = yPosition;
   }
+}
+
+void resetMatrixGlobalVariables()
+{
+  min.value = 100;
+  max.value = 0;
+  sum = 0;
 }
 
 void *MutexWorker(void *arg)
@@ -157,6 +164,63 @@ void *MutexWorker(void *arg)
 
   return NULL;
 }
+
+/*
+Bagworker
+*/
+void *BagWorker(void *arg)
+{
+  //barrier
+  long myid = (long) arg;
+  int total, i, j, first, last;
+  int myMax = 0;
+  int myMin = 100;
+  int maxXPosition = 0;
+  int maxYPosition = 0;
+  int minXPosition = 0;
+  int minYPosition = 0;
+  int row = 0;
+
+  /* sum, max and min operations in my strip */
+  total = 0;
+  while(1) {
+  pthread_mutex_lock(&bagMutex);
+  row = nextrow++;
+  pthread_mutex_unlock(&bagMutex);
+  if(row  >= MAXSIZE)
+    break;
+  //printf("Thread %d handling row %d\n", myid, row);
+  for (j = 0; j < size; j++) {
+    total += matrix[row][j];
+
+    if(myMin > matrix[row][j]) {
+      myMin = matrix[row][j];
+      minXPosition = row;
+      minYPosition = j;
+    }
+    if(myMax < matrix[row][j]) {
+      myMax = matrix[row][j];
+      maxXPosition = row;
+      maxYPosition = j;
+    }
+  }
+  }
+  
+    pthread_mutex_lock(&minMutex);
+    MinOperation(myMin, minXPosition, minYPosition);
+    pthread_mutex_unlock(&minMutex);
+    
+    pthread_mutex_lock(&maxMutex);
+    MaxOperation(myMax, maxXPosition, maxYPosition);
+    pthread_mutex_unlock(&maxMutex);
+
+    pthread_mutex_lock(&sumMutex);
+    sum += total;
+    pthread_mutex_unlock(&sumMutex);
+
+  return NULL;
+}
+
 
 /* Each worker sums the values in one strip of the matrix.
    After a barrier, worker(0) computes and prints the total */
@@ -232,6 +296,7 @@ void *MutexWorker(void *arg)
     /* get end time */
     end_time = read_timer();
     /* print results */
+    printf("OperationsWithBarrier:\n");
     printf("The total is %d\n", total);
     printf("The Min value is %d and its position is (%d, %d)\n", min, minPosition[0], minPosition[1]);
     printf("The Max value is %d and its position is (%d, %d)\n", max, maxPosition[0], maxPosition[1]);
@@ -266,8 +331,6 @@ void *MutexWorker(void *arg)
 
   void matrixOperationsWithMutex()
   {
-    max.value = 0;
-    min.value = 100; 
     int i, j;
     long l; /* use long in case of a 64-bit system */
     pthread_attr_t attr;
@@ -281,6 +344,7 @@ void *MutexWorker(void *arg)
     pthread_mutex_init(&minMutex, NULL);
     pthread_mutex_init(&maxMutex, NULL);
 
+
     /* do the parallel work: create the workers */
     start_time = read_timer();
     for (l = 0; l < numWorkers; l++)
@@ -293,6 +357,7 @@ void *MutexWorker(void *arg)
     }
     end_time = read_timer();
 
+    printf("OperationsWithMutex:\n");
     printf("The total is %d\n", sum);
     printf("The Min value is %d and its position is (%d, %d)\n", min.value, min.x, min.y);
     printf("The Max value is %d and its position is (%d, %d)\n", max.value, max.x, max.y);
@@ -300,6 +365,46 @@ void *MutexWorker(void *arg)
     pthread_mutex_destroy(&sumMutex);
     pthread_mutex_destroy(&minMutex);
     pthread_mutex_destroy(&maxMutex);
+    
+} 
+
+  void matrixOperationsWithBag()
+  {
+    int i, j;
+    long l; /* use long in case of a 64-bit system */
+    pthread_attr_t attr;
+    pthread_t workerid[MAXWORKERS];
+    /* set global thread attributes */
+    pthread_attr_init(&attr);
+    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+
+    /* initialize mutex and condition variable */
+    pthread_mutex_init(&sumMutex, NULL);
+    pthread_mutex_init(&minMutex, NULL);
+    pthread_mutex_init(&maxMutex, NULL);
+    pthread_mutex_init(&bagMutex, NULL);
+
+    /* do the parallel work: create the workers */
+    start_time = read_timer();
+    for (l = 0; l < numWorkers; l++)
+    {
+      pthread_create(&workerid[l], &attr, BagWorker, (void *) l);
+    }
+    for (l = 0; l < numWorkers; l++)
+    {
+      pthread_join(workerid[l], NULL);
+    }
+    end_time = read_timer();
+
+    printf("OperationsWithBag:\n");
+    printf("The total is %d\n", sum);
+    printf("The Min value is %d and its position is (%d, %d)\n", min.value, min.x, min.y);
+    printf("The Max value is %d and its position is (%d, %d)\n", max.value, max.x, max.y);
+    printf("The execution time is %g sec\n", end_time - start_time);
+    pthread_mutex_destroy(&sumMutex);
+    pthread_mutex_destroy(&minMutex);
+    pthread_mutex_destroy(&maxMutex);
+    pthread_mutex_destroy(&bagMutex);
 } 
 
 /* read command line, initialize, and create threads */
@@ -314,7 +419,7 @@ int main(int argc, char *argv[]) {
   /* initialize the matrix */
   for (int i = 0; i < size; i++) {
 	  for (int j = 0; j < size; j++) {
-          matrix[i][j] = rand() % 89;//rand()%99;
+          matrix[i][j] = (rand() % 47)+ 4;//rand()%99;
 	  }
   }
 // for (int i = 0; i < size; i++) {
@@ -325,6 +430,9 @@ int main(int argc, char *argv[]) {
 // printf(" ]\n");
 //}
   /* do the parallel work: create the workers */
+  resetMatrixGlobalVariables();
+  matrixOperationsWithBag();
+  resetMatrixGlobalVariables();
   matrixOperationsWithMutex();
   matrixOperationsWithBarrier();
   return 0;  

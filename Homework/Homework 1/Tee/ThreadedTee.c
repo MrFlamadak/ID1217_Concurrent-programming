@@ -12,14 +12,42 @@ pthread_cond_t inputCondition = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t mutexforData = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t outputCondition = PTHREAD_COND_INITIALIZER;
 
+
+pthread_mutex_t barrier;  /* mutex lock for the barrier */
+
+pthread_cond_t go;        /* condition variable for leaving */
+int numWorkers = 2 ;           /* number of workers */ 
+int numArrived = 0;       /* number who have arrived */
+
 //Shared variables
 char string[MAXIMUMLENGTH];
 bool dataReady = false;
-int writersFinished = 0;
 
 void *Reader(void*);
 void *FileWriter(void*);
 void *SystemWriter(void*);
+
+/* a reusable counter barrier */
+void Barrier() {
+  pthread_mutex_lock(&barrier);
+  numArrived++;
+  if (numArrived == numWorkers) {
+    numArrived = 0;
+    pthread_mutex_lock(&mutexforData);
+    dataReady = false;
+    pthread_mutex_unlock(&mutexforData);
+    pthread_cond_signal(&outputCondition);
+    pthread_cond_broadcast(&go);
+  } else
+  { 
+    pthread_mutex_lock(&mutexforData);
+    dataReady = false;
+    pthread_mutex_unlock(&mutexforData);
+    pthread_cond_wait(&go, &barrier);
+  }
+  pthread_mutex_unlock(&barrier);
+}
+
 
 void waitForData()
 {
@@ -27,19 +55,13 @@ void waitForData()
     while(!dataReady)
     {
         pthread_cond_wait(&inputCondition, &mutexforData);
-
     }
     pthread_mutex_unlock(&mutexforData);
 }
 void waitForWriters()
 {
     pthread_mutex_lock(&mutexforWriters);
-    while(writersFinished < 2)
-    {
-        pthread_cond_wait(&outputCondition, &mutexforWriters);
-
-    }
-    writersFinished = 0;
+    pthread_cond_wait(&outputCondition, &mutexforWriters);
     pthread_mutex_unlock(&mutexforWriters);
 }
 
@@ -47,14 +69,16 @@ void waitForWriters()
 void *Reader(void* arg) {
     while(1) {
     // System input
-    
+
     fgets(string, sizeof(string), stdin);
     pthread_mutex_lock(&mutexforData);
     dataReady = true;
     pthread_cond_broadcast(&inputCondition);
     pthread_mutex_unlock(&mutexforData);
     waitForWriters();
+    //memset(string, 0, sizeof(string));
     }
+    pthread_exit(NULL);
 }
 
 void *FileWriter(void* arg) {
@@ -64,13 +88,7 @@ void *FileWriter(void* arg) {
         waitForData();
         fputs(string, wFile);
         fflush(wFile);
-        pthread_mutex_lock(&mutexforWriters);
-        writersFinished++;
-        if(writersFinished == 2) {
-
-            pthread_cond_broadcast(&outputCondition);
-        }
-        pthread_mutex_unlock(&mutexforWriters);
+        Barrier();
     }
 }
 
@@ -79,15 +97,7 @@ void *SystemWriter(void* arg) {
     {
         waitForData();
         fputs(string, stdout);
-        pthread_mutex_lock(&mutexforWriters);
-        writersFinished++;
-        if(writersFinished == 2) {
-            pthread_cond_broadcast(&outputCondition);
-        }
-        pthread_mutex_unlock(&mutexforWriters);
-        pthread_mutex_lock(&mutexforData);
-        dataReady = false;
-        pthread_mutex_unlock(&mutexforData);
+        Barrier();
     }
 }
 

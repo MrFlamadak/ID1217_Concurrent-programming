@@ -56,7 +56,7 @@ void* BabyBird(void* arg)
         }
         else
         {
-            printf("bird %ld is chrping for food\n", rank );
+            printf("bird %ld is chirping for food\n", rank );
             sem_post(&dishAcess);
             sem_post(&emptyDish);
             sem_wait(&notEmptyDish);
